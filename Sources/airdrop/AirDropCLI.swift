@@ -23,6 +23,11 @@ enum OptionType: String {
 
 class AirDropCLI:  NSObject, NSApplicationDelegate, NSSharingServiceDelegate {
     let consoleIO = ConsoleIO()
+    private var isIndividualSharing = false
+    private var individualSharingItems: [URL] = []
+    private var individualSharingSuccessful = 0
+    private var individualSharingFailed = 0
+    private var sharingStartTime: Date?
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         let argCount = Int(CommandLine.argc)
@@ -65,40 +70,86 @@ class AirDropCLI:  NSObject, NSApplicationDelegate, NSSharingServiceDelegate {
         }
 
         var filesToShare: [URL] = []
+        var invalidPaths: [String] = []
 
         for pathToFile in pathsToFiles {
-            if let url = URL(string: pathToFile), url.scheme != nil {
+            if let url = URL(string: pathToFile), 
+               let scheme = url.scheme?.lowercased(),
+               ["http", "https"].contains(scheme) {
                 filesToShare.append(url)
             } else {
                 let fileURL: URL = NSURL.fileURL(withPath: pathToFile, isDirectory: false)
-                filesToShare.append(fileURL.standardizedFileURL)
+                
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    filesToShare.append(fileURL.standardizedFileURL)
+                } else {
+                    invalidPaths.append(pathToFile)
+                }
             }
         }
-
-        if service.canPerform(withItems: filesToShare) {
-            service.delegate = self
-            service.perform(withItems: filesToShare)
-        }  else {
-            consoleIO.writeMessage("Can't perform: file is likely to be nonexistent.", to: .error)
+        
+        if !invalidPaths.isEmpty {
+            consoleIO.writeMessage("Warning: The following paths are invalid")
+            for path in invalidPaths {
+                consoleIO.writeMessage("    \(path)")
+            }
+        }
+        
+        guard !filesToShare.isEmpty else {
+            consoleIO.writeMessage("Warning: No valid files or URLs to share.")
             exit(1)
         }
-    }
+        
+        consoleIO.writeMessage("Sharing \(filesToShare.count) items:")
+        for (index, url) in filesToShare.enumerated() {
+            consoleIO.writeMessage("  \(index + 1). \(url)")
+        }
 
-    func sharingService(_ sharingService: NSSharingService, willShareItems items: [Any]) {
-        consoleIO.writeMessage("Sending \(items.count) files:")
-        for item in items {
-            consoleIO.writeMessage("📩 \(item)")
+        let hasURLs = filesToShare.contains { $0.scheme == "http" || $0.scheme == "https" }
+        let hasFiles = filesToShare.contains { $0.scheme == "file" }
+        let isMixedContent: Bool = hasURLs && hasFiles
+        
+        if isMixedContent {
+            // Currently, AirDrop does not support sharing both URLs and files at once. Therefore, we need to share them individually.
+            shareItemsIndividually(service: service, filesToShare)
+        } else {
+            if service.canPerform(withItems: filesToShare) {
+                service.delegate = self
+                service.perform(withItems: filesToShare)
+            } else {
+                // If we can't share all items at once, for example, when there is more than 1 URL, we need to share them individually
+                shareItemsIndividually(service: service, filesToShare)
+            }
         }
     }
 
+
     func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) {
-        consoleIO.writeMessage("✅ Files were sent successfully!")
-        exit(0)
+        if isIndividualSharing {
+            individualSharingSuccessful += 1
+            guard let service: NSSharingService = NSSharingService(named: .sendViaAirDrop) else {
+                exit(2)
+            }
+            shareNextItem(service: service, remainingItems: individualSharingItems)
+        } else {
+            consoleIO.writeMessage("✅ Sharing completed: \(items.count) successful")
+            exit(0)
+        }
     }
 
     func sharingService(_ sharingService: NSSharingService, didFailToShareItems items: [Any], error: Error) {
-        consoleIO.writeMessage(error.localizedDescription, to: .error)
-        exit(1)
+        if isIndividualSharing {
+            individualSharingFailed += 1
+            consoleIO.writeMessage("Failed to share item: \(error.localizedDescription)", to: .error)
+            
+            guard let service: NSSharingService = NSSharingService(named: .sendViaAirDrop) else {
+                exit(2)
+            }
+            shareNextItem(service: service, remainingItems: individualSharingItems)
+        } else {
+            consoleIO.writeMessage(error.localizedDescription, to: .error)
+            exit(1)
+        }
     }
 
     func sharingService(_ sharingService: NSSharingService, sourceFrameOnScreenForShareItem item: Any) -> NSRect {
@@ -118,5 +169,34 @@ class AirDropCLI:  NSObject, NSApplicationDelegate, NSSharingServiceDelegate {
         airDropMenuWindow.makeKeyAndOrderFront(nil)
 
         return airDropMenuWindow
+    }
+    
+    private func shareItemsIndividually(service: NSSharingService, _ items: [URL]) {
+        isIndividualSharing = true
+        individualSharingItems = items
+        individualSharingSuccessful = 0
+        individualSharingFailed = 0
+        
+        shareNextItem(service: service, remainingItems: items)
+    }
+    
+    private func shareNextItem(service: NSSharingService, remainingItems: [URL]) {
+        guard !remainingItems.isEmpty else {
+            consoleIO.writeMessage("✅ Sharing completed: \(individualSharingSuccessful) successful, \(individualSharingFailed) failed")
+            exit(individualSharingFailed > 0 ? 1 : 0)
+        }
+        
+        let currentItem = remainingItems.first!
+        let remainingItemsAfterCurrent = Array(remainingItems.dropFirst())
+        
+        if service.canPerform(withItems: [currentItem]) {
+            service.delegate = self
+            service.perform(withItems: [currentItem])
+                        individualSharingItems = remainingItemsAfterCurrent
+        } else {
+            consoleIO.writeMessage("Cannot share: \(currentItem)", to: .error)
+            individualSharingFailed += 1
+            shareNextItem(service: service, remainingItems: remainingItemsAfterCurrent)
+        }
     }
 }

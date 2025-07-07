@@ -25,8 +25,13 @@ class ConsoleIO {
     func printUsage() {
         let executableName = (CommandLine.arguments[0] as NSString).lastPathComponent
 
-        writeMessage("usage: \(executableName) [<args>]")
-        writeMessage("    args – URLs or paths to files, which you'd like to AirDrop")
+        writeMessage("USAGE: \(executableName) <file1> [file2] [file3] ...")
+        writeMessage("    file1, file2, file3, ... – URLs or paths to files to AirDrop")
+        writeMessage("    You can specify multiple items - both local files and web URLs, and you can mix them too.")
+        writeMessage("\nEXAMPLES:")
+        writeMessage("    \(executableName) document.pdf")
+        writeMessage("    \(executableName) image1.jpg image2.png")
+        writeMessage("    \(executableName) file.txt https://apple.com/")
         writeMessage("\nOPTIONS:")
         writeMessage("    -h, --help – print help info")
     }

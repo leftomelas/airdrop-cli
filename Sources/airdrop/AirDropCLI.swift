@@ -31,28 +31,38 @@ class AirDropCLI:  NSObject, NSApplicationDelegate, NSSharingServiceDelegate {
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         let argCount = Int(CommandLine.argc)
-        guard argCount >= 2 else {
+
+        if argCount >= 2 {
+            let argument = CommandLine.arguments[1]
+            if argCount == 2 && argument.hasPrefix("-") {
+                if argument == "-" {
+                    // Process stdin
+                    let stdinPaths = readPathsFromStdin()
+                    if stdinPaths.isEmpty {
+                        consoleIO.printUsage()
+                        exit(0)
+                    }
+                    shareFiles(stdinPaths)
+                } else {
+                    let (option, _) = getOption(argument)
+
+                    if option == .help {
+                        consoleIO.printUsage()
+                    } else {
+                        consoleIO.writeMessage("Unknown option, see usage.\n", to: .error)
+                        consoleIO.printUsage()
+                    }
+
+                    exit(0)
+                }
+            } else {
+                let pathsToFiles = Array(CommandLine.arguments[1 ..< argCount])
+                shareFiles(pathsToFiles)
+            }
+        } else {
             consoleIO.printUsage()
             exit(0)
         }
-
-        let argument = CommandLine.arguments[1]
-        if argCount == 2 && argument.hasPrefix("-") {
-            let (option, _) = getOption(argument)
-
-            if option == .help {
-                consoleIO.printUsage()
-            } else {
-                consoleIO.writeMessage("Unknown option, see usage.\n", to: .error)
-                consoleIO.printUsage()
-            }
-
-            exit(0)
-        }
-
-        let pathsToFiles = Array(CommandLine.arguments[1 ..< argCount])
-
-        shareFiles(pathsToFiles)
 
         if #available(macOS 13.0, *) {
             NSApp.setActivationPolicy(.accessory)
@@ -192,11 +202,24 @@ class AirDropCLI:  NSObject, NSApplicationDelegate, NSSharingServiceDelegate {
         if service.canPerform(withItems: [currentItem]) {
             service.delegate = self
             service.perform(withItems: [currentItem])
-                        individualSharingItems = remainingItemsAfterCurrent
+            individualSharingItems = remainingItemsAfterCurrent
         } else {
             consoleIO.writeMessage("Cannot share: \(currentItem)", to: .error)
             individualSharingFailed += 1
             shareNextItem(service: service, remainingItems: remainingItemsAfterCurrent)
         }
+    }
+
+    private func readPathsFromStdin() -> [String] {
+        var paths: [String] = []
+        
+        while let line = readLine() {
+            let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedLine.isEmpty {
+                paths.append(trimmedLine)
+            }
+        }
+        
+        return paths
     }
 }

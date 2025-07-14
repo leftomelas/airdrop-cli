@@ -28,11 +28,14 @@ class ConsoleIO {
         writeMessage("USAGE: \(executableName) <file1> [file2] [file3] ...")
         writeMessage("    file1, file2, file3, ... – URLs or paths to files to AirDrop")
         writeMessage("    You can specify multiple items - both local files and web URLs, and you can mix them too.")
+        writeMessage("    You can also pipe input from other commands: command | \(executableName)")
         writeMessage("\nEXAMPLES:")
         writeMessage("    \(executableName) document.pdf")
         writeMessage("    \(executableName) image1.jpg image2.png")
         writeMessage("    \(executableName) file.txt https://apple.com/")
+        writeMessage("    find . -name '*.pdf' | \(executableName) -")
         writeMessage("\nOPTIONS:")
         writeMessage("    -h, --help – print help info")
+        writeMessage("    - – read file paths from stdin")
     }
 }
